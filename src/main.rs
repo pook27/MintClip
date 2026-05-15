@@ -150,6 +150,8 @@ fn detect_content_type(text: &str) -> (&'static str, egui::Color32) {
         ("URL", egui::Color32::from_rgb(100, 180, 255))
     } else if t.contains('@') && !t.contains(' ') && t.contains('.') {
         ("Email", egui::Color32::from_rgb(255, 200, 100))
+    } else if !t.contains(' ') && (t.starts_with("ghp_") || t.starts_with("gho_") || (t.len() > 24 && t.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-'))) {
+        ("Token", egui::Color32::from_rgb(255, 100, 100))
     } else if (t.starts_with('{') && t.ends_with('}')) || (t.starts_with('[') && t.ends_with(']')) {
         ("JSON", egui::Color32::from_rgb(150, 255, 150))
     } else if (t.starts_with('/') && !t.starts_with("//")) || t.starts_with("~/") {
@@ -272,7 +274,7 @@ impl MintClipUI {
     fn highlight_text(syntax_set: &SyntaxSet, theme_set: &ThemeSet, text: &str, category: &str) -> egui::text::LayoutJob {
         let mut job = egui::text::LayoutJob::default();
         
-        if category != "Code" && category != "⚙ JSON" {
+        if category != "Code" && category != "JSON" && category != "Token" {
             let bidi_fixed_text = fix_bidi_text(text);
             job.append(
                 &bidi_fixed_text,
@@ -286,7 +288,7 @@ impl MintClipUI {
             return job;
         }
 
-        let syntax = if category == "⚙ JSON" {
+        let syntax = if category == "JSON" {
             syntax_set.find_syntax_by_extension("json").unwrap()
         } else {
             syntax_set.find_syntax_by_first_line(text)
@@ -318,7 +320,6 @@ impl MintClipUI {
 impl eframe::App for MintClipUI {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         
-        // NEW: Check if we are currently displaying the "Copied!" feedback delay
         if let Some((_, time_clicked)) = self.copied_status {
             if time_clicked.elapsed() > Duration::from_millis(150) {
                 // Time is up, close the app!
