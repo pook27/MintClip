@@ -159,7 +159,7 @@ fn detect_content_type(text: &str) -> (&'static str, egui::Color32) {
         || t.contains("var ") || t.contains("print(") || t.contains("console.log(")
         || t.contains("println!(") || t.contains("public ") || t.contains("<?php")
         || (t.contains("if ") && t.contains('{')) || (t.contains("for ") && t.contains('{')) {
-        ("Code", egui::Color32::from_rgb(200, 200, 100))
+        ("Code", egui::Color32::from_rgb(100, 255, 150))
     } else {
         ("Text", egui::Color32::GRAY)
     }
