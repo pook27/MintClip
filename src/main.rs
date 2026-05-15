@@ -536,6 +536,7 @@ impl eframe::App for MintClipUI {
                     if let ClipContent::Image(path) = removed_item.content {
                         let _ = fs::remove_file(path);
                     }
+                    needs_save = true;
                 }
 
                 if needs_save {
