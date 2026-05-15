@@ -573,7 +573,6 @@ fn main() {
             let pid = pid_str.trim();
             let cmdline_path = format!("/proc/{}/cmdline", pid);
             if let Ok(cmdline) = fs::read_to_string(cmdline_path) {
-                // Make sure we don't accidentally kill the background daemon!
                 if cmdline.contains("mintclip") && !cmdline.contains("--daemon") {
                     if let Ok(status) = std::process::Command::new("kill").arg(pid).status() {
                         if status.success() {
@@ -585,14 +584,28 @@ fn main() {
             }
         }
         
-        // Save our PID for the next time the shortcut is pressed
         let _ = fs::write(&pid_file, std::process::id().to_string());
 
+        // FIX 1: Use the IconData struct directly. from_rgba_unmultiplied doesn't exist in eframe 0.27
+        let icon_data = if let Ok(image_bytes) = fs::read("assets/icon.png") {
+            if let Ok(image) = image::load_from_memory(&image_bytes) {
+                let rgba = image.into_rgba8();
+                let (width, height) = rgba.dimensions();
+                Some(egui::IconData {
+                    rgba: rgba.into_raw(),
+                    width,
+                    height,
+                })
+            } else { None }
+        } else { None };
+
+        // FIX 2: Remove the comma after .with_inner_size() so the builder chain continues
         let options = eframe::NativeOptions {
             viewport: egui::ViewportBuilder::default()
                 .with_decorations(true)          
                 .with_always_on_top()             
-                .with_inner_size([450.0, 600.0]),
+                .with_inner_size([450.0, 600.0]) // REMOVED COMMA HERE
+                .with_icon(icon_data.unwrap_or_default()),
             ..Default::default()
         };
 
