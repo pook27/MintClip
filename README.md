@@ -1,5 +1,3 @@
-Here is a punchy description, the step-by-step guide to changing the logo, and a complete, professional `README.md` for your GitHub repository.
-
 ### Project Description
 
 **MintClip** is a blazing-fast, natively-rendered clipboard manager for Linux built entirely in Rust. Designed to bring the fluid `Win+V` experience to Linux, it features a background daemon that silently logs your clipboard history, and a lightweight GUI that offers fuzzy searching, image support, and automatic syntax highlighting for developer workflows.
