@@ -154,7 +154,7 @@ fn detect_content_type(text: &str) -> (&'static str, egui::Color32) {
         ("JSON", egui::Color32::from_rgb(150, 255, 150))
     } else if (t.starts_with('/') && !t.starts_with("//")) || t.starts_with("~/") {
         ("Path", egui::Color32::from_rgb(255, 150, 255))
-    } else if t.contains("fn ") || t.contains("let ") || t.contains("const ") 
+    } else if t.contains("fn ") || t.contains("let ") || t.contains("sudo ") || t.contains("const ") 
         || t.contains("import ") || t.contains("def ") || t.contains("class ") 
         || t.contains("var ") || t.contains("print(") || t.contains("console.log(")
         || t.contains("println!(") || t.contains("public ") || t.contains("<?php")
