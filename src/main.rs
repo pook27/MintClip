@@ -73,12 +73,26 @@ impl ClipHistory {
     }
 
     fn add_new(&mut self, content: ClipContent) {
+        let mut was_pinned = false;
+        if let ClipContent::Text(ref new_text) = content {
+            if let Some(pos) = self.items.iter().position(|item| {
+                if let ClipContent::Text(ref existing_text) = item.content {
+                    existing_text.trim() == new_text.trim()
+                } else {
+                    false
+                }
+            }) {
+                was_pinned = self.items[pos].is_pinned;
+                self.items.remove(pos);
+            }
+        }
+
         self.items.insert(
             0,
             ClipItem {
                 content,
                 timestamp: SystemTime::now(),
-                is_pinned: false,
+                is_pinned: was_pinned,
             },
         );
 
@@ -194,7 +208,7 @@ fn run_daemon() {
         if let Ok(current_text) = clipboard.get_text() {
             let current_text = current_text.trim().to_string();
             if !current_text.is_empty() && current_text != last_copied_text {
-                let mut history = ClipHistory::load(); 
+                let mut history = ClipHistory::load();
 
                 history.add_new(ClipContent::Text(current_text.clone()));
                 history.save();
@@ -225,7 +239,6 @@ struct MintClipUI {
     search_query: String,
     syntax_set: SyntaxSet,
     theme_set: ThemeSet,
-    // NEW: Tracker for the visual copy feedback delay
     copied_status: Option<(usize, Instant)>,
 }
 
@@ -525,7 +538,6 @@ impl eframe::App for MintClipUI {
                                     
                                     ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                                         
-                                        // NEW: Show "Copied!" overlay if this item was clicked
                                         if is_recently_copied {
                                             ui.vertical_centered(|ui| {
                                                 ui.add_space(8.0);
@@ -670,14 +682,13 @@ fn main() {
             let pid = pid_str.trim();
             let cmdline_path = format!("/proc/{}/cmdline", pid);
             if let Ok(cmdline) = fs::read_to_string(cmdline_path) {
-                // If another daemon is already running, exit immediately!
                 if cmdline.contains("mintclip") && cmdline.contains("--daemon") {
-                    println!("Daemon is already running in the background.");
-                    return; 
+                    println!("Old daemon found (PID: {}). Restarting with new code...", pid);
+                    let _ = std::process::Command::new("kill").arg("-9").arg(pid).status();
+                    std::thread::sleep(std::time::Duration::from_millis(50));
                 }
             }
         }
-        // Save our PID to claim the daemon slot
         let _ = fs::write(&daemon_pid_file, std::process::id().to_string());
         run_daemon();
     } else {
