@@ -1,5 +1,4 @@
 use arboard::{Clipboard, ImageData};
-use chrono::{DateTime, Local};
 use directories::ProjectDirs;
 use eframe::egui;
 use fuzzy_matcher::skim::SkimMatcherV2;
@@ -234,8 +233,10 @@ impl MintClipUI {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         egui_extras::install_image_loaders(&cc.egui_ctx);
         let mut visuals = egui::Visuals::dark();
-        visuals.window_rounding = egui::Rounding::same(12.0);
-        visuals.panel_fill = egui::Color32::from_rgb(25, 25, 25);
+        visuals.window_rounding = egui::Rounding::same(14.0);
+        visuals.panel_fill = egui::Color32::from_rgb(16, 18, 24);
+        visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(35, 40, 52));
+        visuals.selection.bg_fill = egui::Color32::from_rgb(55, 95, 160);
         cc.egui_ctx.set_visuals(visuals);
 
         let mut fonts = egui::FontDefinitions::default();
@@ -332,55 +333,107 @@ impl eframe::App for MintClipUI {
 
         egui::CentralPanel::default().show(ctx, |ui| {
             
-            ui.vertical_centered(|ui| {
-                ui.add_space(10.0);
-                ui.heading(egui::RichText::new("📋 MintClip").strong().size(22.0));
-                ui.add_space(5.0);
-            });
-            ui.separator();
-            
+            // ── Header ──────────────────────────────────────────────────────
+            ui.add_space(6.0);
             ui.horizontal(|ui| {
-                ui.label("🔍");
-                ui.add(egui::TextEdit::singleline(&mut self.search_query).hint_text("Search..."));
-                
+                ui.centered_and_justified(|ui| {
+                    ui.label(
+                        egui::RichText::new("MintClip")
+                            .size(15.0)
+                            .color(egui::Color32::from_rgb(110, 190, 140))
+                            .strong(),
+                    );
+                });
+
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("Clear").clicked() {
+                    if ui.add(
+                        egui::Button::new(
+                            egui::RichText::new("🗑️")
+                                .size(20.0)
+                                .color(egui::Color32::from_rgb(90, 95, 115)),
+                        )
+                        .frame(false),
+                    ).clicked() {
                         self.history.items.retain(|item| item.is_pinned);
                         self.history.save();
                     }
                 });
             });
+            ui.add_space(8.0);
 
-            ui.add_space(5.0);
-            ui.separator();
+            // ── Search bar ───────────────────────────────────────────────────
+            egui::Frame::none()
+                .fill(egui::Color32::from_rgb(24, 27, 36))
+                .rounding(8.0)
+                .inner_margin(egui::Margin { left: 10.0, right: 10.0, top: 7.0, bottom: 7.0 })
+                .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(42, 47, 62)))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new("🔍")
+                                .size(12.0)
+                                .color(egui::Color32::from_rgb(85, 92, 115)),
+                        );
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.search_query)
+                                .hint_text("search…")
+                                .frame(false)
+                                .desired_width(f32::INFINITY),
+                        );
+                    });
+                });
+
+            ui.add_space(10.0);
 
             let mut needs_save = false;
             let mut item_to_delete = None;
 
             let matcher = SkimMatcherV2::default();
-            let mut display_items: Vec<(usize, i64)> = Vec::new(); 
+            // (item_index, fuzzy_score, is_category_match)
+            let mut display_items: Vec<(usize, i64, bool)> = Vec::new();
+
+            let query_lower = self.search_query.to_lowercase();
 
             for (i, item) in self.history.items.iter().enumerate() {
                 if self.search_query.is_empty() {
-                    display_items.push((i, 0)); 
+                    display_items.push((i, 0, false));
                 } else {
                     match &item.content {
                         ClipContent::Text(text) => {
-                            if let Some(score) = matcher.fuzzy_match(text, &self.search_query) {
-                                display_items.push((i, score));
+                            let (tag, _) = detect_content_type(text);
+                            
+                            // 1. Check for Category Match (Fuzzy match against the tag name)
+                            let is_category_match = matcher
+                                .fuzzy_match(&tag.to_lowercase(), &query_lower)
+                                .is_some();
+                                
+                            // 2. Check for Text Match
+                            let text_score = matcher.fuzzy_match(text, &self.search_query);
+
+                            if is_category_match || text_score.is_some() {
+                                // If it matches the category name, we flag it to push it to the top
+                                display_items.push((i, text_score.unwrap_or(0), is_category_match));
                             }
                         }
-                        ClipContent::Image(_) => {} 
+                        ClipContent::Image(_) => {
+                            if matcher.fuzzy_match("image", &query_lower).is_some() {
+                                display_items.push((i, 0, true));
+                            }
+                        }
                     }
                 }
             }
 
             if !self.search_query.is_empty() {
                 display_items.sort_by(|a, b| {
-                    let is_pinned_a = self.history.items[a.0].is_pinned;
-                    let is_pinned_b = self.history.items[b.0].is_pinned;
-                    
-                    is_pinned_b.cmp(&is_pinned_a)
+                    let item_a = &self.history.items[a.0];
+                    let item_b = &self.history.items[b.0];
+
+                    // Priority 1: Pinned status
+                    item_b.is_pinned.cmp(&item_a.is_pinned)
+                        // Priority 2: Is it a Category Match? (e.g., searching "Token")
+                        .then_with(|| b.2.cmp(&a.2))
+                        // Priority 3: Fuzzy text match score
                         .then_with(|| b.1.cmp(&a.1))
                 });
             }
@@ -389,8 +442,12 @@ impl eframe::App for MintClipUI {
             let theme_set = &self.theme_set;
 
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                for &(original_idx, _) in &display_items {
+                for &(original_idx, _, _) in &display_items {
                     let item = &mut self.history.items[original_idx];
+                    let accent_color = match &item.content {
+                        ClipContent::Text(text) => detect_content_type(text).1,
+                        ClipContent::Image(_) => egui::Color32::from_rgb(255, 140, 90),
+                    };
                     
                     // See if this specific item is the one that was just copied
                     let is_recently_copied = self.copied_status.map_or(false, |(idx, _)| idx == original_idx);
@@ -400,15 +457,15 @@ impl eframe::App for MintClipUI {
 
                     // 2. Set dynamic colors
                     let bg = if is_hovered {
-                        egui::Color32::from_rgb(45, 45, 45)
+                        egui::Color32::from_rgb(30, 34, 46)
                     } else {
-                        egui::Color32::from_rgb(35, 35, 35)
+                        egui::Color32::from_rgb(22, 25, 33)
                     };
 
                     let stroke = if is_hovered {
-                        egui::Stroke::new(1.0, egui::Color32::from_rgb(100, 100, 100)) // Tiny border glow
+                        egui::Stroke::new(1.0, egui::Color32::from_rgb(58, 76, 112))
                     } else {
-                        egui::Stroke::NONE
+                        egui::Stroke::new(1.0, egui::Color32::from_rgb(32, 36, 48))
                     };
 
                     // 3. Draw the frame and capture it in a variable
@@ -416,50 +473,84 @@ impl eframe::App for MintClipUI {
                         .fill(bg)
                         .stroke(stroke)
                         .rounding(8.0)
-                        .inner_margin(12.0)
+                        .inner_margin(egui::Margin { left: 16.0, right: 10.0, top: 10.0, bottom: 10.0 })
                         .show(ui, |ui| {
                             ui.horizontal(|ui| {
                                 
                                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                     
-                                    // 1. Delete Button
-                                    if ui.add(egui::Button::new("🗑").frame(false)).on_hover_text("Delete").clicked() {
+                                    // 1. Delete Button — clean ✕ symbol
+                                    if ui.add(
+                                        egui::Button::new(
+                                            egui::RichText::new("✕")
+                                                .size(11.0)
+                                                .color(egui::Color32::from_rgb(100, 105, 125)),
+                                        )
+                                        .frame(false),
+                                    ).on_hover_text("Delete").clicked() {
                                         item_to_delete = Some(original_idx);
                                     }
 
-                                    // 2. Pin Button
-                                    let (pin_icon, pin_color) = if item.is_pinned { 
-                                        ("📌", egui::Color32::from_rgb(100, 200, 255))
-                                    } else { 
-                                        ("📍", egui::Color32::GRAY) 
+                                    // 2. Pin Button — geometric diamond
+                                    let (pin_icon, pin_color) = if item.is_pinned {
+                                        ("◆", egui::Color32::from_rgb(85, 165, 250))
+                                    } else {
+                                        ("◇", egui::Color32::from_rgb(75, 80, 100))
                                     };
-                                    if ui.add(egui::Button::new(egui::RichText::new(pin_icon).color(pin_color)).frame(false)).clicked() {
+                                    if ui.add(
+                                        egui::Button::new(
+                                            egui::RichText::new(pin_icon)
+                                                .size(11.0)
+                                                .color(pin_color),
+                                        )
+                                        .frame(false),
+                                    ).on_hover_text(if item.is_pinned { "Unpin" } else { "Pin" }).clicked() {
                                         item.is_pinned = !item.is_pinned;
                                         needs_save = true;
                                     }
 
-                                    // 3. NEW: Absolute Timestamp (Formats perfectly to local time zone)
-                                    let datetime: DateTime<Local> = item.timestamp.into();
-                                    let time_str = datetime.format("%Y-%m-%d %H:%M:%S").to_string();
-                                    ui.label(egui::RichText::new(time_str).size(10.0).color(egui::Color32::from_rgb(140, 140, 140)));
+                                    // 3. Relative timestamp
+                                    let time_str = {
+                                        let elapsed = item.timestamp.elapsed().unwrap_or_default();
+                                        let s = elapsed.as_secs();
+                                        if s < 60 { "just now".to_string() }
+                                        else if s < 3600 { format!("{}m ago", s / 60) }
+                                        else if s < 86400 { format!("{}h ago", s / 3600) }
+                                        else {
+                                            let d = s / 86400;
+                                            if d == 1 { "yesterday".to_string() } else { format!("{}d ago", d) }
+                                        }
+                                    };
+                                    ui.label(egui::RichText::new(time_str).size(10.0).color(egui::Color32::from_rgb(72, 78, 98)));
                                     
                                     ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                                         
                                         // NEW: Show "Copied!" overlay if this item was clicked
                                         if is_recently_copied {
                                             ui.vertical_centered(|ui| {
-                                                ui.add_space(10.0);
-                                                ui.label(egui::RichText::new("✅ Copied!").color(egui::Color32::GREEN).size(16.0).strong());
-                                                ui.add_space(10.0);
+                                                ui.add_space(8.0);
+                                                ui.label(
+                                                    egui::RichText::new("✓ copied")
+                                                        .color(egui::Color32::from_rgb(100, 200, 140))
+                                                        .size(13.0),
+                                                );
+                                                ui.add_space(8.0);
                                             });
-                                        } 
+                                        }
                                         else {
                                             // Render the standard text or image
                                             match &item.content {
                                                 ClipContent::Text(raw_text) => {
                                                     let (tag, color) = detect_content_type(raw_text);
                                                     ui.vertical(|ui| {
-                                                        ui.label(egui::RichText::new(tag).size(10.0).color(color));
+                                                        // Pill badge for content type
+                                                        egui::Frame::none()
+                                                            .fill(egui::Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 25))
+                                                            .rounding(4.0)
+                                                            .inner_margin(egui::Margin { left: 6.0, right: 6.0, top: 2.0, bottom: 2.0 })
+                                                            .show(ui, |ui| {
+                                                                ui.label(egui::RichText::new(tag).size(9.0).color(color));
+                                                            });
                                                         
                                                         let display_text = if raw_text.chars().count() > 300 {
                                                             format!("{}...", raw_text.chars().take(300).collect::<String>())
@@ -488,7 +579,14 @@ impl eframe::App for MintClipUI {
                                                 }
                                                 ClipContent::Image(path) => {
                                                     ui.vertical(|ui| {
-                                                        ui.label(egui::RichText::new("Image").size(10.0).color(egui::Color32::from_rgb(255, 150, 100)));
+                                                        let img_color = egui::Color32::from_rgb(255, 140, 90);
+                                                        egui::Frame::none()
+                                                            .fill(egui::Color32::from_rgba_unmultiplied(255, 140, 90, 25))
+                                                            .rounding(4.0)
+                                                            .inner_margin(egui::Margin { left: 6.0, right: 6.0, top: 2.0, bottom: 2.0 })
+                                                            .show(ui, |ui| {
+                                                                ui.label(egui::RichText::new("image").size(9.0).color(img_color));
+                                                            });
 
                                                         let img_uri = format!("file://{}", path.display());
                                                         let response = ui.add(
@@ -525,9 +623,22 @@ impl eframe::App for MintClipUI {
                                 });
                             });
                         }).response;
+                    // Draw left accent bar keyed to content type
+                    {
+                        let rect = frame_response.rect;
+                        let accent_rect = egui::Rect::from_min_max(
+                            rect.min + egui::vec2(1.0, 7.0),
+                            egui::pos2(rect.min.x + 4.0, rect.max.y - 7.0),
+                        );
+                        let bar_color = egui::Color32::from_rgba_unmultiplied(
+                            accent_color.r(), accent_color.g(), accent_color.b(), 180,
+                        );
+                        ui.painter().rect_filled(accent_rect, egui::Rounding::same(2.0), bar_color);
+                    }
+
                     let interact_response = ui.interact(frame_response.rect, card_id, egui::Sense::hover());
                     ctx.data_mut(|d| d.insert_temp(card_id, interact_response.hovered()));
-                    ui.add_space(6.0);
+                    ui.add_space(5.0);
                 }
 
                 if let Some(idx) = item_to_delete {
@@ -588,7 +699,6 @@ fn main() {
         
         let _ = fs::write(&pid_file, std::process::id().to_string());
 
-        // FIX 1: Use the IconData struct directly. from_rgba_unmultiplied doesn't exist in eframe 0.27
         let icon_data = if let Ok(image_bytes) = fs::read("assets/icon.png") {
             if let Ok(image) = image::load_from_memory(&image_bytes) {
                 let rgba = image.into_rgba8();
@@ -601,12 +711,11 @@ fn main() {
             } else { None }
         } else { None };
 
-        // FIX 2: Remove the comma after .with_inner_size() so the builder chain continues
         let options = eframe::NativeOptions {
             viewport: egui::ViewportBuilder::default()
                 .with_decorations(true)          
                 .with_always_on_top()             
-                .with_inner_size([450.0, 600.0]) // REMOVED COMMA HERE
+                .with_inner_size([450.0, 600.0])
                 .with_icon(icon_data.unwrap_or_default()),
             ..Default::default()
         };
