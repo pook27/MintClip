@@ -33,7 +33,6 @@ sudo apt install xcb libxcb-shape0-dev libxcb-xfixes0-dev
 Download the repository and compile the highly-optimized release binary.
 
 ```bash
-https://github.com/pook27/MintClip.git
 git clone https://github.com/pook27/MintClip.git
 cd mintclip
 cargo build --release
