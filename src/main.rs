@@ -136,7 +136,7 @@ fn save_image_to_disk(img_data: &ImageData) -> Option<PathBuf> {
 
     let filename = format!(
         "{}.png",
-        SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis()
+        SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default().as_millis()
     );
     let filepath = img_dir.join(filename);
 
@@ -155,6 +155,37 @@ fn save_image_to_disk(img_data: &ImageData) -> Option<PathBuf> {
         return Some(filepath);
     }
     None
+}
+
+fn cleanup_orphaned_images(history: &ClipHistory) {
+    if let Some(dir) = ClipHistory::get_dir() {
+        let img_dir = dir.join("images");
+        if !img_dir.exists() { return; }
+
+        // 1. Collect all valid image paths that are actually in our history
+        let valid_paths: std::collections::HashSet<_> = history.items.iter()
+            .filter_map(|item| {
+                if let ClipContent::Image(path) = &item.content {
+                    Some(path.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // 2. Scan the hard drive and delete anything not in that valid list
+        if let Ok(entries) = fs::read_dir(&img_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("png") {
+                    if !valid_paths.contains(&path) {
+                        let _ = fs::remove_file(&path);
+                        println!("MintClip GC: Deleted orphaned image {:?}", path);
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn detect_content_type(text: &str) -> (&'static str, egui::Color32) {
@@ -200,7 +231,17 @@ fn fix_bidi_text(text: &str) -> String {
 
 fn run_daemon() {
     println!("MintClip daemon started. Listening for clipboard changes...");
-    let mut clipboard = Clipboard::new().unwrap();
+    
+    let mut clipboard = match Clipboard::new() {
+        Ok(cb) => cb,
+        Err(e) => {
+            eprintln!("CRITICAL ERROR: Failed to connect to system clipboard. Retrying later... ({})", e);
+            std::thread::sleep(Duration::from_secs(3));
+            return;
+        }
+    };
+
+    // Use unwrap_or_default() so if the clipboard is empty on boot, it just starts with an empty string
     let mut last_copied_text = clipboard.get_text().unwrap_or_default();
     let mut last_image_hash: u64 = 0;
     
@@ -276,12 +317,15 @@ impl MintClipUI {
         }
         cc.egui_ctx.set_fonts(fonts);
 
+        let history = ClipHistory::load();
+        cleanup_orphaned_images(&history);
+
         Self {
-            history: ClipHistory::load(),
+            history,
             search_query: String::new(),
             syntax_set: SyntaxSet::load_defaults_newlines(),
             theme_set: ThemeSet::load_defaults(),
-            copied_status: None, // Starts off as nothing copied
+            copied_status: None,
         }
     }
 
@@ -303,10 +347,12 @@ impl MintClipUI {
         }
 
         let syntax = if category == "JSON" {
-            syntax_set.find_syntax_by_extension("json").unwrap()
+            syntax_set.find_syntax_by_extension("json")
+                .unwrap_or_else(|| syntax_set.find_syntax_plain_text())
         } else {
             syntax_set.find_syntax_by_first_line(text)
-                .unwrap_or_else(|| syntax_set.find_syntax_by_extension("rs").unwrap())
+                .or_else(|| syntax_set.find_syntax_by_extension("rs"))
+                .unwrap_or_else(|| syntax_set.find_syntax_plain_text())
         };
 
         let theme = &theme_set.themes["base16-ocean.dark"];
@@ -731,10 +777,12 @@ fn main() {
             ..Default::default()
         };
 
-        eframe::run_native(
+        if let Err(e) = eframe::run_native(
             "MintClip",
             options,
             Box::new(|cc| Box::new(MintClipUI::new(cc))), 
-        ).unwrap();
+        ) {
+            eprintln!("Failed to launch MintClip UI: {}", e);
+        }
     }
 }
