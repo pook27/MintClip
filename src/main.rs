@@ -382,7 +382,13 @@ impl eframe::App for MintClipUI {
         
         if let Some((_, time_clicked)) = self.copied_status {
             if time_clicked.elapsed() > Duration::from_millis(150) {
-                // Time is up, close the app!
+                // NEW: Spawn a detached process to paste AFTER this process dies
+                // (It tries wtype for Wayland first, then falls back to xdotool for X11)
+                std::process::Command::new("sh")
+                    .arg("-c")
+                    .arg("sleep 0.15 && (wtype -M ctrl -k v -m ctrl || xdotool key ctrl+v)")
+                    .spawn()
+                    .ok();
                 std::process::exit(0);
             } else {
                 // Ensure egui repaints continually so we actually see the feedback text
