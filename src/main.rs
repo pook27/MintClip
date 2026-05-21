@@ -1,4 +1,6 @@
 use arboard::{Clipboard, ImageData};
+use std::sync::{Arc, Mutex};
+use enigo::{Enigo, Key, KeyboardControllable};
 use directories::ProjectDirs;
 use eframe::egui;
 use fuzzy_matcher::skim::SkimMatcherV2;
@@ -281,10 +283,11 @@ struct MintClipUI {
     syntax_set: SyntaxSet,
     theme_set: ThemeSet,
     copied_status: Option<(usize, Instant)>,
+    should_paste: Arc<Mutex<bool>>,
 }
 
 impl MintClipUI {
-    fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    fn new(cc: &eframe::CreationContext<'_>, should_paste: Arc<Mutex<bool>>) -> Self {
         egui_extras::install_image_loaders(&cc.egui_ctx);
         let mut visuals = egui::Visuals::dark();
         visuals.window_rounding = egui::Rounding::same(14.0);
@@ -326,6 +329,7 @@ impl MintClipUI {
             syntax_set: SyntaxSet::load_defaults_newlines(),
             theme_set: ThemeSet::load_defaults(),
             copied_status: None,
+            should_paste,
         }
     }
 
@@ -382,14 +386,12 @@ impl eframe::App for MintClipUI {
         
         if let Some((_, time_clicked)) = self.copied_status {
             if time_clicked.elapsed() > Duration::from_millis(150) {
-                // NEW: Spawn a detached process to paste AFTER this process dies
-                // (It tries wtype for Wayland first, then falls back to xdotool for X11)
-                std::process::Command::new("sh")
-                    .arg("-c")
-                    .arg("sleep 0.15 && (wtype -M ctrl -k v -m ctrl || xdotool key ctrl+v)")
-                    .spawn()
-                    .ok();
-                std::process::exit(0);
+                // Flag that we want to trigger a paste
+                if let Ok(mut sp) = self.should_paste.lock() {
+                    *sp = true;
+                }
+                // Tell eframe to safely close the window
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             } else {
                 // Ensure egui repaints continually so we actually see the feedback text
                 ctx.request_repaint(); 
@@ -783,12 +785,27 @@ fn main() {
             ..Default::default()
         };
 
+        let should_paste = Arc::new(Mutex::new(false));
+        let app_should_paste = Arc::clone(&should_paste);
+
+        // Pass the state into the App
         if let Err(e) = eframe::run_native(
             "MintClip",
             options,
-            Box::new(|cc| Box::new(MintClipUI::new(cc))), 
+            Box::new(move |cc| Box::new(MintClipUI::new(cc, app_should_paste))), 
         ) {
             eprintln!("Failed to launch MintClip UI: {}", e);
+        }
+        
+        // NEW: The window is now closed. Let's paste!
+        if *should_paste.lock().unwrap() {
+            // Wait 100ms for the OS to restore focus to your previous window
+            std::thread::sleep(Duration::from_millis(100));
+
+            let mut enigo = Enigo::new();
+            enigo.key_down(Key::Control);
+            enigo.key_click(Key::Layout('v'));
+            enigo.key_up(Key::Control);
         }
     }
 }

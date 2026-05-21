@@ -3,7 +3,7 @@
 echo "🚀 Starting MintClip Installation..."
 
 # 1. Check for Rust/Cargo
-if ! command -v cargo &> /dev/null; then
+if ! command -v cargo &>/dev/null; then
     echo "❌ Error: Rust and Cargo are not installed."
     echo "Please install Rust first by running: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
     exit 1
@@ -12,7 +12,7 @@ fi
 # 2. Install X11 Clipboard Dependencies (Requires sudo)
 echo "📦 Checking system dependencies (may prompt for sudo password)..."
 sudo apt-get update
-sudo apt-get install -y xcb libxcb-shape0-dev libxcb-xfixes0-dev
+sudo apt-get install -y xcb libxcb-shape0-dev libxcb-xfixes0-dev libxdo-dev
 
 # 3. Kill existing instances to prevent "Text file busy" overwrite errors
 echo "🛑 Stopping any running MintClip instances..."
@@ -26,7 +26,7 @@ cargo build --release
 echo "🚚 Installing binary to ~/.local/bin..."
 mkdir -p ~/.local/bin
 # We use 'rm -f' first just in case pkill was too slow
-rm -f ~/.local/bin/mintclip 
+rm -f ~/.local/bin/mintclip
 cp target/release/mintclip ~/.local/bin/mintclip
 chmod +x ~/.local/bin/mintclip
 
@@ -42,7 +42,7 @@ fi
 # 7. Create the Application Menu Shortcut
 echo "📝 Creating application menu entry..."
 mkdir -p ~/.local/share/applications
-cat <<EOF > ~/.local/share/applications/mintclip.desktop
+cat <<EOF >~/.local/share/applications/mintclip.desktop
 [Desktop Entry]
 Name=MintClip
 Comment=Native Linux Clipboard Manager
@@ -56,7 +56,7 @@ EOF
 # 8. Set up the background daemon to start on boot
 echo "⚙️ Configuring background daemon autostart..."
 mkdir -p ~/.config/autostart
-cat <<EOF > ~/.config/autostart/mintclip-daemon.desktop
+cat <<EOF >~/.config/autostart/mintclip-daemon.desktop
 [Desktop Entry]
 Type=Application
 Exec=sh -c "sleep 3 && $HOME/.local/bin/mintclip --daemon"
@@ -71,7 +71,7 @@ EOF
 
 # 9. Start the new daemon right now so the user doesn't have to reboot!
 echo "🔄 Starting the MintClip background daemon..."
-nohup $HOME/.local/bin/mintclip --daemon > /dev/null 2>&1 &
+nohup $HOME/.local/bin/mintclip --daemon >/dev/null 2>&1 &
 
 echo "======================================"
 echo "✅ Installation Complete!"
