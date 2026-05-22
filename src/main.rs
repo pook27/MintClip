@@ -20,9 +20,58 @@ use syntect::highlighting::ThemeSet;
 use syntect::parsing::SyntaxSet;
 use syntect::util::LinesWithEndings;
 
-const MAX_HISTORY: usize = 50;
+// --- STEP 1: CONFIGURATION ---
 
-// --- STEP 1: THE DATA MODEL ---
+#[derive(Serialize, Deserialize, Clone)]
+struct AppConfig {
+    max_history: usize,
+    window_width: f32,
+    window_height: f32,
+    font_size: f32,
+    accent_color: [u8; 3], 
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            max_history: 50,
+            window_width: 450.0,
+            window_height: 600.0,
+            font_size: 14.0,
+            accent_color: [110, 190, 140],
+        }
+    }
+}
+
+impl AppConfig {
+    fn get_file_path() -> Option<PathBuf> {
+        ProjectDirs::from("com", "mintclip", "mintclip").map(|d| d.config_dir().join("config.toml"))
+    }
+
+    fn load() -> Self {
+        if let Some(path) = Self::get_file_path() {
+            if let Ok(data) = fs::read_to_string(path) {
+                if let Ok(config) = toml::from_str(&data) {
+                    return config;
+                }
+            }
+        }
+        Self::default()
+    }
+
+    fn save(&self) {
+        if let Some(path) = Self::get_file_path() {
+            if let Some(dir) = path.parent() {
+                let _ = fs::create_dir_all(dir);
+            }
+            if let Ok(data) = toml::to_string_pretty(self) {
+                let _ = fs::write(path, data);
+            }
+        }
+    }
+}
+
+// --- STEP 2: THE DATA MODEL ---
 
 #[derive(Serialize, Deserialize, Clone)]
 enum ClipContent {
@@ -74,7 +123,7 @@ impl ClipHistory {
         }
     }
 
-    fn add_new(&mut self, content: ClipContent) {
+    fn add_new(&mut self, content: ClipContent, max_history: usize) {
         let mut was_pinned = false;
         if let ClipContent::Text(ref new_text) = content {
             if let Some(pos) = self.items.iter().position(|item| {
@@ -109,8 +158,8 @@ impl ClipHistory {
             }
         }
 
-        if unpinned.len() > MAX_HISTORY {
-            for item in unpinned.drain(MAX_HISTORY..) {
+        if unpinned.len() > max_history {
+            for item in unpinned.drain(max_history..) {
                 if let ClipContent::Image(path) = item.content {
                     let _ = fs::remove_file(path);
                 }
@@ -251,9 +300,9 @@ fn run_daemon() {
         if let Ok(current_text) = clipboard.get_text() {
             let current_text = current_text.trim().to_string();
             if !current_text.is_empty() && current_text != last_copied_text {
+                let config = AppConfig::load();
                 let mut history = ClipHistory::load();
-
-                history.add_new(ClipContent::Text(current_text.clone()));
+                history.add_new(ClipContent::Text(current_text.clone()), config.max_history);
                 history.save();
                 last_copied_text = current_text;
             }
@@ -263,9 +312,9 @@ fn run_daemon() {
             let current_hash = hash_image_bytes(&current_image.bytes);
             if current_hash != last_image_hash {
                 if let Some(path) = save_image_to_disk(&current_image) {
+                    let config = AppConfig::load();
                     let mut history = ClipHistory::load(); 
-
-                    history.add_new(ClipContent::Image(path));
+                    history.add_new(ClipContent::Image(path), config.max_history);
                     history.save();
                 }
                 last_image_hash = current_hash;
@@ -278,6 +327,8 @@ fn run_daemon() {
 // --- STEP 3: THE VISUAL UI ---
 
 struct MintClipUI {
+    config: AppConfig,
+    show_settings: bool,
     history: ClipHistory,
     search_query: String,
     syntax_set: SyntaxSet,
@@ -324,6 +375,8 @@ impl MintClipUI {
         cleanup_orphaned_images(&history);
 
         Self {
+            config: AppConfig::load(),
+            show_settings: false,
             history,
             search_query: String::new(),
             syntax_set: SyntaxSet::load_defaults_newlines(),
@@ -386,16 +439,54 @@ impl eframe::App for MintClipUI {
         
         if let Some((_, time_clicked)) = self.copied_status {
             if time_clicked.elapsed() > Duration::from_millis(150) {
-                // Flag that we want to trigger a paste
                 if let Ok(mut sp) = self.should_paste.lock() {
                     *sp = true;
                 }
-                // Tell eframe to safely close the window
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             } else {
-                // Ensure egui repaints continually so we actually see the feedback text
                 ctx.request_repaint(); 
             }
+        }
+
+        if self.show_settings {
+            egui::Window::new("⚙ Settings")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                .show(ctx, |ui| {
+                    ui.add_space(5.0);
+                    ui.horizontal(|ui| {
+                        ui.label("Accent Color:");
+                        let mut color = egui::Color32::from_rgb(
+                            self.config.accent_color[0],
+                            self.config.accent_color[1],
+                            self.config.accent_color[2]
+                        );
+                        if ui.color_edit_button_srgba(&mut color).changed() {
+                            self.config.accent_color = [color.r(), color.g(), color.b()];
+                        }
+                    });
+                    ui.add_space(5.0);
+                    ui.add(egui::Slider::new(&mut self.config.max_history, 10..=500).text("Max History Limit"));
+                    ui.add(egui::Slider::new(&mut self.config.window_width, 300.0..=800.0).text("Window Width (px)"));
+                    ui.add(egui::Slider::new(&mut self.config.window_height, 400.0..=1000.0).text("Window Height (px)"));
+                    ui.add(egui::Slider::new(&mut self.config.font_size, 10.0..=24.0).text("Base Font Size"));
+                    
+                    ui.add_space(15.0);
+                    ui.horizontal(|ui| {
+                        if ui.button(egui::RichText::new("Save & Apply").color(egui::Color32::LIGHT_GREEN)).clicked() {
+                            self.config.save();
+                            self.show_settings = false;
+                            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(
+                                egui::vec2(self.config.window_width, self.config.window_height)
+                            ));
+                        }
+                        if ui.button("Cancel").clicked() {
+                            self.config = AppConfig::load();
+                            self.show_settings = false;
+                        }
+                    });
+                });
         }
 
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -413,14 +504,27 @@ impl eframe::App for MintClipUI {
                 });
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    // 1. Settings Button
                     if ui.add(
                         egui::Button::new(
-                            egui::RichText::new("🗑️")
-                                .size(20.0)
+                            egui::RichText::new("⚙")
+                                .size(self.config.font_size + 4.0)
                                 .color(egui::Color32::from_rgb(90, 95, 115)),
                         )
                         .frame(false),
-                    ).clicked() {
+                    ).on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text("Settings").clicked() {
+                        self.show_settings = true;
+                    }
+
+                    // 2. Clear History Button
+                    if ui.add(
+                        egui::Button::new(
+                            egui::RichText::new("🗑️")
+                                .size(self.config.font_size + 4.0)
+                                .color(egui::Color32::from_rgb(90, 95, 115)),
+                        )
+                        .frame(false),
+                    ).on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text("Clear Unpinned").clicked() {
                         self.history.items.retain(|item| item.is_pinned);
                         self.history.save();
                     }
@@ -776,11 +880,12 @@ fn main() {
             } else { None }
         } else { None };
 
+        let config = AppConfig::load();
         let options = eframe::NativeOptions {
             viewport: egui::ViewportBuilder::default()
                 .with_decorations(true)          
                 .with_always_on_top()             
-                .with_inner_size([450.0, 600.0])
+                .with_inner_size([config.window_width, config.window_height])
                 .with_icon(icon_data.unwrap_or_default()),
             ..Default::default()
         };
