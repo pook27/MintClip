@@ -386,7 +386,7 @@ impl MintClipUI {
         }
     }
 
-    fn highlight_text(syntax_set: &SyntaxSet, theme_set: &ThemeSet, text: &str, category: &str) -> egui::text::LayoutJob {
+    fn highlight_text(syntax_set: &SyntaxSet, theme_set: &ThemeSet, text: &str, category: &str, font_size: f32) -> egui::text::LayoutJob {
         let mut job = egui::text::LayoutJob::default();
         
         if category != "Code" && category != "JSON" && category != "Token" {
@@ -396,7 +396,7 @@ impl MintClipUI {
                 0.0,
                 egui::TextFormat {
                     color: egui::Color32::LIGHT_GRAY,
-                    font_id: egui::FontId::proportional(14.0),
+                    font_id: egui::FontId::proportional(font_size),
                     ..Default::default()
                 },
             );
@@ -424,7 +424,7 @@ impl MintClipUI {
                     0.0,
                     egui::TextFormat {
                         color,
-                        font_id: egui::FontId::monospace(14.0),
+                        font_id: egui::FontId::monospace(font_size),
                         ..Default::default()
                     },
                 );
@@ -728,7 +728,7 @@ impl eframe::App for MintClipUI {
                                                             raw_text.to_string()
                                                         };
 
-                                                        let layout_job = Self::highlight_text(syntax_set, theme_set, &display_text, tag);
+                                                        let layout_job = Self::highlight_text(syntax_set, theme_set, &display_text, tag, self.config.font_size);
 
                                                         egui::ScrollArea::vertical()
                                                             .id_source(original_idx) // Required so egui doesn't get confused in a loop
@@ -902,7 +902,7 @@ fn main() {
             eprintln!("Failed to launch MintClip UI: {}", e);
         }
         
-        // NEW: The window is now closed. Let's paste!
+        // The window is now closed. Let's paste!
         if *should_paste.lock().unwrap() {
             // Wait 100ms for the OS to restore focus to your previous window
             std::thread::sleep(Duration::from_millis(100));
