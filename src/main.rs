@@ -491,7 +491,7 @@ impl eframe::App for MintClipUI {
 
         egui::CentralPanel::default().show(ctx, |ui| {
             
-            // ── Header ──────────────────────────────────────────────────────
+            // Header
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 ui.centered_and_justified(|ui| {
@@ -532,7 +532,7 @@ impl eframe::App for MintClipUI {
             });
             ui.add_space(8.0);
 
-            // ── Search bar ───────────────────────────────────────────────────
+            // Search bar
             egui::Frame::none()
                 .fill(egui::Color32::from_rgb(24, 27, 36))
                 .rounding(8.0)
@@ -868,8 +868,9 @@ fn main() {
         
         let _ = fs::write(&pid_file, std::process::id().to_string());
 
-        let icon_data = if let Ok(image_bytes) = fs::read("assets/icon.png") {
-            if let Ok(image) = image::load_from_memory(&image_bytes) {
+        let icon_data = {
+            const ICON_BYTES: &[u8] = include_bytes!("../assets/icon.png");
+            if let Ok(image) = image::load_from_memory(ICON_BYTES) {
                 let rgba = image.into_rgba8();
                 let (width, height) = rgba.dimensions();
                 Some(egui::IconData {
@@ -877,8 +878,10 @@ fn main() {
                     width,
                     height,
                 })
-            } else { None }
-        } else { None };
+            } else {
+                None
+            }
+        };
 
         let config = AppConfig::load();
         let options = eframe::NativeOptions {
